@@ -1,0 +1,21 @@
+network:
+  num_sbs: 5
+  capacity_sbs: 100.0
+  capacity_mbs: 500.0
+
+energy:
+  p_active: 200.0
+  p_sleep: 10.0
+  p_switch: 5.0
+
+traffic:
+  min: 10.0
+  max: 120.0
+
+rl:
+  train_timesteps: 5000
+  max_episode_steps: 100
+  threshold_drop: 0.05
+
+llm:
+  simulation_rounds: 3
