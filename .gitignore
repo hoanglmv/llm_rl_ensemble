@@ -1,2 +1,4 @@
 *.pyc
-datasets
+datasets/
+
+outputs/

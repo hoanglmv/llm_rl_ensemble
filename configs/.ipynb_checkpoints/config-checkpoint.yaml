@@ -1,25 +1,29 @@
 network:
-  num_cells: 5            # Số lượng trạm phát sóng (Sites)
-  sectors_per_cell: 3     # Mặc định 3 sector một trạm (Alpha, Beta, Gamma)
-  inter_site_distance: 1.5 # Khoảng cách trung bình giữa các trạm (km)
-  capacity_sector: 100.0  # Mbps per sector
+  num_cells: 5
+  sectors_per_cell: 3
+  inter_site_distance: 1.5
+  capacity_sector: 100.0
+  capacity_mbs: 500.0
 
 energy:
-  p_base: 100.0           # Công suất nền của trạm (khi bật ít nhất 1 sector)
-  p_sector_active: 50.0   # Công suất tiêu thụ thêm mỗi sector active
-  p_sleep: 10.0           # Công suất khi ngủ đông toàn bộ
+  p_base: 100.0
+  p_sector_active: 50.0
+  p_sleep: 10.0
   p_switch: 2.0
 
 traffic:
   min_users: 5
   max_users: 50
-  data_per_user_min: 0.5  # Mbps
-  data_per_user_max: 5.0  # Mbps
+  data_per_user_min: 0.5
+  data_per_user_max: 5.0
+  # [MỚI] Cấu hình cho Dataset
+  simulation_steps: 24   # Giả lập 24 giờ trong 1 file data
+  pattern: "sinewave"    # Dạng dữ liệu (ngẫu nhiên hoặc hình sin)
 
 rl:
-  train_timesteps: 10000
-  max_episode_steps: 100
+  train_timesteps: 5000
+  max_episode_steps: 24  # 1 Episode = 1 chu kỳ data (24h)
   threshold_drop: 0.05
-  
+
 llm:
   simulation_rounds: 3

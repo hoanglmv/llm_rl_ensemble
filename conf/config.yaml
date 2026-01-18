@@ -1,16 +1,21 @@
 network:
-  num_sbs: 5
-  capacity_sbs: 100.0
-  capacity_mbs: 500.0
+  num_cells: 5            # Đổi từ num_sbs thành num_cells
+  sectors_per_cell: 3     # Mặc định 3 sector/trạm
+  inter_site_distance: 1.5 # Khoảng cách giữa các trạm (km)
+  capacity_sector: 100.0  # Dung lượng mỗi sector (Mbps)
+  capacity_mbs: 500.0     # Dung lượng trạm Macro
 
 energy:
-  p_active: 200.0
-  p_sleep: 10.0
-  p_switch: 5.0
+  p_base: 100.0           # Công suất nền (khi trạm bật)
+  p_sector_active: 50.0   # Công suất thêm cho mỗi sector active
+  p_sleep: 10.0           # Công suất ngủ đông
+  p_switch: 2.0           # Phạt năng lượng khi chuyển trạng thái
 
 traffic:
-  min: 10.0
-  max: 120.0
+  min_users: 5
+  max_users: 50
+  data_per_user_min: 0.5  # Mbps
+  data_per_user_max: 5.0  # Mbps
 
 rl:
   train_timesteps: 5000
