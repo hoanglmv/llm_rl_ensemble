@@ -2,152 +2,141 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from omegaconf import DictConfig
-from utils.topology import NetworkGraph
 
 class TelecomEnv(gym.Env):
-    def __init__(self, cfg: DictConfig):
+    # [QUAN TRỌNG] Thêm tham số data_pack=None vào đây
+    def __init__(self, cfg: DictConfig, data_pack=None):
         super(TelecomEnv, self).__init__()
         self.cfg = cfg
         
+        # 1. Xử lý Data Pack (Dataset)
+        if data_pack:
+            # Nếu có dataset, dùng topology và traffic từ file
+            self.graph = data_pack['topology']
+            self.traffic_matrix = data_pack['traffic'] # Shape: (Steps, Sectors)
+            self.user_matrix = data_pack['users']      # Shape: (Steps, Sectors)
+            self.max_data_steps = self.traffic_matrix.shape[0]
+            print(f"   --> Env đã load {self.max_data_steps} bước dữ liệu từ Dataset.")
+        else:
+            # Nếu không có dataset, báo lỗi vì hệ thống mới yêu cầu phải có
+            raise ValueError("LỖI: Environment yêu cầu phải có 'data_pack' (chạy utils/create.py trước)")
+
         self.n_cells = cfg.network.num_cells
         self.n_sectors = cfg.network.sectors_per_cell 
         self.total_sectors = self.n_cells * self.n_sectors
         
-        # Khởi tạo đồ thị mạng
-        self.graph = NetworkGraph(self.n_cells, cfg.network.inter_site_distance)
-        
-        # --- OBSERVATION SPACE ---
+        # --- Config Spaces ---
         self.observation_space = spaces.Box(
-            low=0, high=10000, 
-            shape=(self.total_sectors * 4,), 
-            dtype=np.float32
+            low=0, high=100000, shape=(self.total_sectors * 4,), dtype=np.float32
         )
-        
-        # --- ACTION SPACE ---
         self.action_space = spaces.MultiBinary(self.total_sectors)
         
         self.reward_function_code = None
         self.last_actions = np.ones(self.total_sectors)
         
-        # [QUAN TRỌNG: SỬA LỖI Ở ĐÂY]
-        self.current_step = 0 
+        # [FIX] Khởi tạo biến đếm
+        self.current_step = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        
-        # [QUAN TRỌNG: RESET BIẾN ĐẾM]
         self.current_step = 0
         
-        # Sinh dữ liệu ngẫu nhiên
-        self.users = np.random.randint(
-            self.cfg.traffic.min_users, 
-            self.cfg.traffic.max_users, 
-            self.total_sectors
-        )
+        # Lấy dữ liệu tại bước đầu tiên (t=0)
+        self.current_traffic = self.traffic_matrix[0]
+        self.current_users = self.user_matrix[0]
         
-        data_demand = np.random.uniform(
-            self.cfg.traffic.data_per_user_min,
-            self.cfg.traffic.data_per_user_max,
-            self.total_sectors
-        )
-        
-        self.traffic_load = self.users * data_demand
         self.sector_status = np.ones(self.total_sectors)
         self.last_actions = np.ones(self.total_sectors)
         
         return self._get_obs(), {}
 
     def _get_obs(self):
-        obs_matrix = np.stack([
-            self.users, 
-            self.traffic_load / (self.users + 1e-9), 
-            self.traffic_load,
+        obs = np.stack([
+            self.current_users,
+            # Tránh chia cho 0
+            self.current_traffic / (self.current_users + 1e-9),
+            self.current_traffic,
             self.sector_status
         ], axis=1)
-        return obs_matrix.flatten().astype(np.float32)
+        return obs.flatten().astype(np.float32)
 
     def step(self, action):
         cfg = self.cfg
         
-        # 1. Logic Traffic
-        total_demand = np.sum(self.traffic_load)
-        served_traffic = 0
+        # 1. Cập nhật dữ liệu Traffic theo thời gian thực (Time-series)
+        # Dùng phép chia lấy dư (%) để lặp lại dữ liệu nếu train lâu hơn 24h
+        t_idx = self.current_step % self.max_data_steps
+        self.current_traffic = self.traffic_matrix[t_idx]
+        self.current_users = self.user_matrix[t_idx]
         
-        for cell_id in range(self.n_cells):
-            sec_start = cell_id * self.n_sectors
-            sec_end = sec_start + self.n_sectors
-            
-            cell_sectors_action = action[sec_start:sec_end]
-            cell_sectors_load = self.traffic_load[sec_start:sec_end]
-            
-            served_local = np.sum(np.minimum(
-                cell_sectors_load * cell_sectors_action, 
-                cfg.network.capacity_sector
-            ))
-            served_traffic += served_local
-            
-            traffic_need_offload = np.sum(cell_sectors_load * (1 - cell_sectors_action))
-            
-            if traffic_need_offload > 0:
-                active_sectors_in_cell = np.sum(cell_sectors_action)
-                if active_sectors_in_cell > 0:
-                    remaining_cap = (active_sectors_in_cell * cfg.network.capacity_sector) - served_local
-                    served_traffic += min(traffic_need_offload, max(0, remaining_cap))
-                else:
-                    neighbor_id = self.graph.get_nearest_neighbor(cell_id, exclude_list=[])
-                    if neighbor_id is not None:
-                        served_traffic += min(traffic_need_offload, cfg.network.capacity_sector)
-
-        drop_rate = 1.0 - (served_traffic / total_demand) if total_demand > 0 else 0.0
+        # 2. Tính toán Traffic phục vụ & Drop Rate
+        # (Logic đơn giản hóa để chạy nhanh, bạn có thể thay bằng logic topology phức tạp nếu cần)
         
-        # 2. Logic Power
-        total_power = 0
-        for cell_id in range(self.n_cells):
-            sec_start = cell_id * self.n_sectors
-            active_sectors = np.sum(action[sec_start : sec_start+3])
+        # Capacity thực tế = Capacity Sector * Trạng thái Bật/Tắt
+        available_capacity = action * cfg.network.capacity_sector
+        
+        # Traffic được phục vụ = Min(Nhu cầu, Khả năng đáp ứng)
+        served_traffic = np.minimum(self.current_traffic, available_capacity)
+        
+        # Tính tổng
+        total_demand_step = np.sum(self.current_traffic)
+        total_served_step = np.sum(served_traffic)
+        
+        # Drop Rate = Phần không được phục vụ / Tổng nhu cầu
+        if total_demand_step > 0:
+            drop_rate = 1.0 - (total_served_step / total_demand_step)
+        else:
+            drop_rate = 0.0
             
-            if active_sectors > 0:
-                cell_power = cfg.energy.p_base + (active_sectors * cfg.energy.p_sector_active)
-            else:
-                cell_power = cfg.energy.p_sleep
-            total_power += cell_power
-            
+        # 3. Tính toán Năng lượng
+        # Công suất nền (cho các Cell có ít nhất 1 sector bật)
+        active_cells = 0
+        for i in range(self.n_cells):
+            # Kiểm tra xem cell thứ i có sector nào bật không
+            start = i * self.n_sectors
+            end = start + self.n_sectors
+            if np.sum(action[start:end]) > 0:
+                active_cells += 1
+                
+        active_sectors = np.sum(action)
+        
+        # P_Total = (Số Cell bật * P_Base) + (Số Sector bật * P_Sector)
+        total_power = (active_cells * cfg.energy.p_base) + (active_sectors * cfg.energy.p_sector_active)
+        
+        # Cộng phạt chuyển đổi trạng thái
         switches = np.sum(np.abs(action - self.last_actions))
         total_power += switches * cfg.energy.p_switch
-        
-        # 3. Reward LLM
+
+        # 4. Tính Reward (LLM Dynamic Reward)
         loc = {
             "power": total_power,
             "drop_rate": drop_rate,
             "switches": switches,
-            "users_active": np.sum(self.users),
+            "users_active": np.sum(self.current_users),
             "reward": 0.0
         }
         
+        # Thực thi code do LLM viết
         if self.reward_function_code:
             try:
                 exec(self.reward_function_code, {}, loc)
                 reward = loc['reward']
             except:
-                reward = -total_power - 1000 * drop_rate
+                reward = -total_power - 1000 * drop_rate # Fallback
         else:
             reward = -total_power - 1000 * drop_rate
 
-        # 4. Update Next Step
+        # 5. Update trạng thái
         self.last_actions = action
         self.sector_status = action
-        
-        self.users = np.random.randint(cfg.traffic.min_users, cfg.traffic.max_users, self.total_sectors)
-        data_demand = np.random.uniform(cfg.traffic.data_per_user_min, cfg.traffic.data_per_user_max, self.total_sectors)
-        self.traffic_load = self.users * data_demand
-        
-        # [SỬA LỖI] Biến này giờ đã được khởi tạo
         self.current_step += 1
-        terminated = self.current_step >= cfg.rl.max_episode_steps
+        
+        # Kết thúc khi hết dữ liệu trong file dataset (hoặc max_step config)
+        terminated = self.current_step >= self.max_data_steps
         
         info = {
-            "power": total_power,
-            "drop_rate": drop_rate,
+            "power": total_power, 
+            "drop_rate": drop_rate, 
             "switches": switches
         }
         
