@@ -1,24 +1,25 @@
-# conf/config.yaml
-
 network:
-  num_sbs: 5              # Số lượng Small Base Station
-  capacity_sbs: 100.0     # Mbps
-  capacity_mbs: 500.0     # Mbps
+  num_cells: 5            # Số lượng trạm phát sóng (Sites)
+  sectors_per_cell: 3     # Mặc định 3 sector một trạm (Alpha, Beta, Gamma)
+  inter_site_distance: 1.5 # Khoảng cách trung bình giữa các trạm (km)
+  capacity_sector: 100.0  # Mbps per sector
 
 energy:
-  p_active: 200.0         # Watts
-  p_sleep: 10.0           # Watts
-  p_switch: 5.0           # Watts (cost per switch)
+  p_base: 100.0           # Công suất nền của trạm (khi bật ít nhất 1 sector)
+  p_sector_active: 50.0   # Công suất tiêu thụ thêm mỗi sector active
+  p_sleep: 10.0           # Công suất khi ngủ đông toàn bộ
+  p_switch: 2.0
 
 traffic:
-  min: 10.0
-  max: 120.0
+  min_users: 5
+  max_users: 50
+  data_per_user_min: 0.5  # Mbps
+  data_per_user_max: 5.0  # Mbps
 
 rl:
-  train_timesteps: 5000   # Số bước train mỗi vòng
-  max_episode_steps: 100  # Độ dài 1 episode
-  threshold_drop: 0.05    # Ngưỡng drop rate chấp nhận (5%)
-
+  train_timesteps: 10000
+  max_episode_steps: 100
+  threshold_drop: 0.05
+  
 llm:
-  # model: "gpt-4"        # Ví dụ để mở rộng sau này
-  simulation_rounds: 3    # Số vòng lặp tiến hóa (Evolution Rounds)
+  simulation_rounds: 3
